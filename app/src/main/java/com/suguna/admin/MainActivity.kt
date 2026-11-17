@@ -22,6 +22,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var prefs: Prefs
     private lateinit var subtitle: TextView
+    private lateinit var onlinePill: TextView
     private lateinit var empty: TextView
     private lateinit var adapter: DeviceAdapter
 
@@ -42,6 +43,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         prefs = Prefs(this)
         subtitle = findViewById(R.id.subtitle)
+        onlinePill = findViewById(R.id.onlinePill)
         empty = findViewById(R.id.empty)
         adapter = DeviceAdapter { device -> showDeviceActions(device) }
         findViewById<RecyclerView>(R.id.list).apply {
@@ -140,7 +142,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 adapter.submit(devices)
                 val online = devices.count { it.online }
-                subtitle.text = "${devices.size} device(s) • $online online"
+                subtitle.text = "${devices.size} device(s) registered • updated just now"
+                onlinePill.text = "$online online"
                 empty.visibility = if (devices.isEmpty()) View.VISIBLE else View.GONE
             }
         }

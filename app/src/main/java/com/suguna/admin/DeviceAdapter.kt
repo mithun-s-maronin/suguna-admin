@@ -27,6 +27,9 @@ class DeviceAdapter(
         val name: TextView = v.findViewById(R.id.name)
         val meta: TextView = v.findViewById(R.id.meta)
         val status: TextView = v.findViewById(R.id.status)
+        val appLine: TextView = v.findViewById(R.id.appLine)
+        val locLine: TextView = v.findViewById(R.id.locLine)
+        val lockBadge: TextView = v.findViewById(R.id.lockBadge)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -37,21 +40,34 @@ class DeviceAdapter(
     override fun getItemCount() = items.size
 
     override fun onBindViewHolder(h: VH, position: Int) {
+        val ctx = h.itemView.context
         val d = items[position]
         h.name.text = d.name.ifBlank { d.id }
+
         val last = if (d.lastSeen > 0) timeFmt.format(Date(d.lastSeen)) else "never"
-        val enroll = if (d.enrollment.isNotBlank()) "Enroll ${d.enrollment} • " else ""
-        val batt = if (d.battery in 0..100) " • ${d.battery}%" else ""
-        val app = if (d.currentApp.isNotBlank()) "\nApp: ${d.currentAppLabel}" else ""
-        val loc = if (d.hasLocation) "\n📍 ${"%.5f".format(d.lat)}, ${"%.5f".format(d.lng)}" +
-            (if (d.locAccuracy > 0) " (±${d.locAccuracy}m)" else "") else ""
-        val lock = if (d.permanentlyLocked) "\n🔒 Permanently locked" else ""
-        h.meta.text = "$enroll$last$batt$app$loc$lock"
-        val colorRes = if (d.online) R.color.online else R.color.offline
-        val color = h.itemView.context.getColor(colorRes)
-        h.dot.setBackgroundColor(color)
+        val enroll = if (d.enrollment.isNotBlank()) "Enroll ${d.enrollment}  •  " else ""
+        val batt = if (d.battery in 0..100) "  •  🔋 ${d.battery}%" else ""
+        h.meta.text = "$enroll$last$batt"
+
+        val color = ctx.getColor(if (d.online) R.color.online else R.color.offline)
+        h.dot.backgroundTintList = android.content.res.ColorStateList.valueOf(color)
         h.status.text = if (d.online) "ONLINE" else "OFFLINE"
         h.status.setTextColor(color)
+        h.status.setBackgroundResource(if (d.online) R.drawable.chip_online else R.drawable.chip_offline)
+
+        if (d.currentApp.isNotBlank()) {
+            h.appLine.text = "Current app:  ${d.currentAppLabel}"
+            h.appLine.visibility = View.VISIBLE
+        } else h.appLine.visibility = View.GONE
+
+        if (d.hasLocation) {
+            val acc = if (d.locAccuracy > 0) "  (±${d.locAccuracy}m)" else ""
+            h.locLine.text = "📍 ${"%.5f".format(d.lat)}, ${"%.5f".format(d.lng)}$acc"
+            h.locLine.visibility = View.VISIBLE
+        } else h.locLine.visibility = View.GONE
+
+        h.lockBadge.visibility = if (d.permanentlyLocked) View.VISIBLE else View.GONE
+
         h.itemView.setOnClickListener { onClick(d) }
     }
 }
