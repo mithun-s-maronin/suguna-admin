@@ -11,13 +11,26 @@ android {
         applicationId = "com.suguna.admin"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    signingConfigs {
+        create("stable") {
+            storeFile = file("suguna.keystore")
+            storePassword = "sugunahome"
+            keyAlias = "suguna"
+            keyPassword = "sugunahome"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("stable")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("stable")
         }
     }
     compileOptions {

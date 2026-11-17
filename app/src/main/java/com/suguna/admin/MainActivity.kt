@@ -148,40 +148,64 @@ class MainActivity : AppCompatActivity() {
 
     // ── Per-device actions ─────────────────────────────────────────────────
     private fun showDeviceActions(d: RemoteDb.Device) {
-        if (!d.online) {
+        val labels = ArrayList<String>()
+        val actions = ArrayList<() -> Unit>()
+
+        if (d.online) {
+            labels.add("Lock now  (student can unlock)")
+            actions.add {
+                confirmAndSend(d, "lock", "Lock ${d.name}?",
+                    "The tablet locks immediately. The student can unlock it normally.")
+            }
+            if (d.permanentlyLocked) {
+                labels.add("Unlock  (release permanent lock)")
+                actions.add {
+                    confirmAndSend(d, "unlock", "Unlock ${d.name}?",
+                        "Removes the permanent lock so the tablet can be used again.")
+                }
+            } else {
+                labels.add("Lock permanently  (only you can unlock)")
+                actions.add {
+                    confirmAndSend(d, "lock_permanent", "Lock ${d.name} permanently?",
+                        "A full-screen lock stays up until you tap Unlock here. " +
+                            "The student cannot get past it.")
+                }
+            }
+        }
+        if (d.hasLocation) {
+            labels.add("View location on map")
+            actions.add { openMap(d) }
+        }
+
+        if (labels.isEmpty()) {
             AlertDialog.Builder(this)
                 .setTitle(d.name)
-                .setMessage("This device is OFFLINE. Commands run only when it is online.")
+                .setMessage("This device is OFFLINE and has no location yet. " +
+                    "Lock commands run only when it is online.")
                 .setPositiveButton("OK", null)
                 .show()
             return
         }
+
         AlertDialog.Builder(this)
-            .setTitle(d.name)
-            .setItems(arrayOf("Lock now", "Factory reset")) { _, which ->
-                when (which) {
-                    0 -> confirmAndSend(d, "lock", "Lock ${d.name}?", "The tablet will lock immediately.")
-                    1 -> confirmFactoryReset(d)
-                }
-            }
+            .setTitle(d.name + if (d.permanentlyLocked) "  🔒 locked" else "")
+            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun confirmFactoryReset(d: RemoteDb.Device) {
-        AlertDialog.Builder(this)
-            .setTitle("Factory reset ${d.name}?")
-            .setMessage("This ERASES the tablet completely and cannot be undone.")
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Continue") { _, _ ->
-                AlertDialog.Builder(this)
-                    .setTitle("Are you absolutely sure?")
-                    .setMessage("Everything on ${d.name} will be permanently wiped.")
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Reset now") { _, _ -> send(d, "factory_reset") }
-                    .show()
-            }
-            .show()
+    private fun openMap(d: RemoteDb.Device) {
+        val lat = d.lat ?: return
+        val lng = d.lng ?: return
+        val uri = android.net.Uri.parse("geo:$lat,$lng?q=$lat,$lng(${android.net.Uri.encode(d.name)})")
+        try {
+            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+        } catch (e: Exception) {
+            // No maps app — fall back to a browser link.
+            val web = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng")
+            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, web)) }
+            catch (e2: Exception) { toast("No app can open maps") }
+        }
     }
 
     private fun confirmAndSend(d: RemoteDb.Device, action: String, title: String, msg: String) {

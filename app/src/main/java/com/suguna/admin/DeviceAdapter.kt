@@ -42,7 +42,11 @@ class DeviceAdapter(
         val last = if (d.lastSeen > 0) timeFmt.format(Date(d.lastSeen)) else "never"
         val enroll = if (d.enrollment.isNotBlank()) "Enroll ${d.enrollment} • " else ""
         val batt = if (d.battery in 0..100) " • ${d.battery}%" else ""
-        h.meta.text = "$enroll$last$batt"
+        val app = if (d.currentApp.isNotBlank()) "\nApp: ${d.currentAppLabel}" else ""
+        val loc = if (d.hasLocation) "\n📍 ${"%.5f".format(d.lat)}, ${"%.5f".format(d.lng)}" +
+            (if (d.locAccuracy > 0) " (±${d.locAccuracy}m)" else "") else ""
+        val lock = if (d.permanentlyLocked) "\n🔒 Permanently locked" else ""
+        h.meta.text = "$enroll$last$batt$app$loc$lock"
         val colorRes = if (d.online) R.color.online else R.color.offline
         val color = h.itemView.context.getColor(colorRes)
         h.dot.setBackgroundColor(color)
