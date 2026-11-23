@@ -16,6 +16,9 @@ class DeviceAdapter(
     private val items = ArrayList<RemoteDb.Device>()
     private val timeFmt = SimpleDateFormat("d MMM, h:mm a", Locale.getDefault())
 
+    /** Device keys (androidId/id) that are the admin's own tablet — shown with a marker. */
+    var exemptKeys: Set<String> = emptySet()
+
     fun submit(list: List<RemoteDb.Device>) {
         items.clear()
         items.addAll(list)
@@ -42,7 +45,8 @@ class DeviceAdapter(
     override fun onBindViewHolder(h: VH, position: Int) {
         val ctx = h.itemView.context
         val d = items[position]
-        h.name.text = d.name.ifBlank { d.id }
+        val isAdmin = (d.androidId.ifBlank { d.id }) in exemptKeys
+        h.name.text = (d.name.ifBlank { d.id }) + if (isAdmin) "  ⭐ admin" else ""
 
         val last = if (d.lastSeen > 0) timeFmt.format(Date(d.lastSeen)) else "never"
         val enroll = if (d.enrollment.isNotBlank()) "Enroll ${d.enrollment}  •  " else ""

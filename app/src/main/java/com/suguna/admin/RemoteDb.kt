@@ -58,6 +58,7 @@ class RemoteDb(private val context: Context) {
         val root = try { JSONObject(body) } catch (e: Exception) { return Fleet.Unreachable }
         val out = ArrayList<Device>()
         for (id in root.keys()) {
+            if (id == ADMIN_NODE) continue   // the panel's single-device activation claim, not a tablet
             val o = root.optJSONObject(id) ?: continue
             out.add(
                 Device(
@@ -115,6 +116,41 @@ class RemoteDb(private val context: Context) {
         return httpDelete("$base/devices/$deviceId.json?auth=$tok")
     }
 
+    // ── Single-device activation lock ────────────────────────────────────────
+    // The panel binds to the first device that logs in. The claim lives at /devices/__admin__,
+    // writable only by the admin email (the DB rules already allow that), so no rules change is
+    // needed and ordinary tablets can't touch it.
+
+    sealed class Binding {
+        object Unclaimed : Binding()                       // no device has activated yet
+        data class ClaimedBy(val androidId: String, val label: String) : Binding()
+        object Error : Binding()                           // couldn't reach the DB / not logged in
+    }
+
+    fun readBinding(): Binding {
+        val tok = token() ?: return Binding.Error
+        val (code, body) = httpGet("$base/devices/$ADMIN_NODE.json?auth=$tok")
+        if (code !in 200..299) return Binding.Error
+        if (body == null || body.isBlank() || body == "null") return Binding.Unclaimed
+        return try {
+            val o = JSONObject(body)
+            val aid = o.optString("boundAndroidId", "")
+            if (aid.isBlank()) Binding.Unclaimed
+            else Binding.ClaimedBy(aid, o.optString("label", "another device"))
+        } catch (e: Exception) { Binding.Error }
+    }
+
+    /** Claim (or transfer) the panel to this device. */
+    fun writeBinding(androidId: String, label: String): Boolean {
+        val tok = token() ?: return false
+        val payload = JSONObject()
+            .put("boundAndroidId", androidId)
+            .put("label", label)
+            .put("boundAt", System.currentTimeMillis())
+            .toString()
+        return httpPut("$base/devices/$ADMIN_NODE.json?auth=$tok", payload)
+    }
+
     // ── HTTP ─────────────────────────────────────────────────────────────
     private fun httpGet(url: String): Pair<Int, String?> = try {
         val c = URL(url).openConnection() as HttpURLConnection
@@ -144,5 +180,8 @@ class RemoteDb(private val context: Context) {
         c.disconnect(); ok
     } catch (e: Exception) { Log.w(TAG, "DELETE failed: ${e.message}"); false }
 
-    private companion object { const val TAG = "RemoteDb" }
+    private companion object {
+        const val TAG = "RemoteDb"
+        const val ADMIN_NODE = "__admin__"
+    }
 }

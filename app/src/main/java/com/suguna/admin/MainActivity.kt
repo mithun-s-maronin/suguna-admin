@@ -1,8 +1,10 @@
 package com.suguna.admin
 
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -93,7 +95,77 @@ class MainActivity : AppCompatActivity() {
 
     private fun onLoggedIn() {
         loggedIn = true
-        startPolling()
+        checkActivation()
+    }
+
+    // ── Single-device activation lock ────────────────────────────────────────
+    /** This admin app's stable per-device id (differs from the MDM's — different signing key). */
+    private fun thisDeviceId(): String =
+        Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
+
+    private fun thisDeviceLabel(): String = "${Build.MANUFACTURER} ${Build.MODEL}"
+
+    /** Bind the panel to the first device that logs in; refuse to run on any other. */
+    private fun checkActivation() {
+        subtitle.text = "Checking activation…"
+        val db = RemoteDb(this)
+        io.execute {
+            val b = db.readBinding()
+            ui.post {
+                when (b) {
+                    is RemoteDb.Binding.Error -> AlertDialog.Builder(this)
+                        .setTitle("Couldn't verify activation")
+                        .setMessage("Can't reach the database to check which device this panel is locked to. Check your connection and retry.")
+                        .setCancelable(false)
+                        .setNegativeButton("Log out") { _, _ -> logout() }
+                        .setPositiveButton("Retry") { _, _ -> checkActivation() }
+                        .show()
+                    is RemoteDb.Binding.Unclaimed -> io.execute {
+                        val ok = db.writeBinding(thisDeviceId(), thisDeviceLabel())
+                        ui.post {
+                            if (ok) { toast("Panel activated on this device"); startPolling() }
+                            else AlertDialog.Builder(this)
+                                .setTitle("Activation failed")
+                                .setMessage("Couldn't claim this device. Retry?")
+                                .setCancelable(false)
+                                .setNegativeButton("Log out") { _, _ -> logout() }
+                                .setPositiveButton("Retry") { _, _ -> checkActivation() }
+                                .show()
+                        }
+                    }
+                    is RemoteDb.Binding.ClaimedBy ->
+                        if (b.androidId == thisDeviceId()) startPolling()
+                        else showActivationBlock(b.label)
+                }
+            }
+        }
+    }
+
+    private fun showActivationBlock(otherLabel: String) {
+        subtitle.text = "Locked to another device"
+        AlertDialog.Builder(this)
+            .setTitle("Panel locked to another device")
+            .setMessage("This admin panel is already activated on \"$otherLabel\". Only one device can run it at a time.")
+            .setCancelable(false)
+            .setNegativeButton("Log out") { _, _ -> logout() }
+            .setPositiveButton("Use this device instead") { _, _ ->
+                AlertDialog.Builder(this)
+                    .setTitle("Switch the panel to this device?")
+                    .setMessage("\"$otherLabel\" will stop working as the admin panel. Continue?")
+                    .setNegativeButton("Cancel") { _, _ -> showActivationBlock(otherLabel) }
+                    .setPositiveButton("Switch") { _, _ ->
+                        val db = RemoteDb(this)
+                        io.execute {
+                            val ok = db.writeBinding(thisDeviceId(), thisDeviceLabel())
+                            ui.post {
+                                if (ok) { toast("Panel moved to this device"); startPolling() }
+                                else showActivationBlock(otherLabel)
+                            }
+                        }
+                    }
+                    .show()
+            }
+            .show()
     }
 
     private fun showMenu(anchor: View) {
@@ -148,6 +220,7 @@ class MainActivity : AppCompatActivity() {
                         subtitle.text = "Can't reach the database — check your connection"
                     is RemoteDb.Fleet.Ok -> {
                         lastDevices = fleet.devices
+                        adapter.exemptKeys = prefs.exemptKeys
                         adapter.submit(fleet.devices)
                         val online = fleet.devices.count { it.online }
                         val who = prefs.adminEmail.ifBlank { "admin" }
@@ -182,6 +255,13 @@ class MainActivity : AppCompatActivity() {
         if (d.hasLocation) {
             labels.add("📍  View location on map")
             actions.add { openMap(d) }
+        }
+        if (isExempt(d)) {
+            labels.add("⭐  Admin device — remove flag")
+            actions.add { setExempt(d, false) }
+        } else {
+            labels.add("⭐  Set as admin device (skip bulk actions)")
+            actions.add { setExempt(d, true) }
         }
         labels.add("🗑️  Remove from panel")
         actions.add { confirmRemove(d) }
@@ -229,6 +309,20 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // ── Admin-device exemption (skipped by bulk actions) ─────────────────────
+    private fun keyOf(d: RemoteDb.Device): String = d.androidId.ifBlank { d.id }
+    private fun isExempt(d: RemoteDb.Device): Boolean = keyOf(d) in prefs.exemptKeys
+
+    private fun setExempt(d: RemoteDb.Device, exempt: Boolean) {
+        val keys = prefs.exemptKeys.toMutableSet()
+        if (exempt) keys.add(keyOf(d)) else keys.remove(keyOf(d))
+        prefs.exemptKeys = keys
+        adapter.exemptKeys = keys
+        adapter.submit(lastDevices)
+        toast(if (exempt) "${d.name.ifBlank { d.id }} set as admin device — bulk actions will skip it"
+              else "${d.name.ifBlank { d.id }} is no longer an admin device")
+    }
+
     private fun confirmAndSend(d: RemoteDb.Device, action: String, title: String, msg: String) {
         val queued = if (!d.online) "\n\nThis tablet is offline — it'll run as soon as it comes online." else ""
         AlertDialog.Builder(this)
@@ -254,11 +348,16 @@ class MainActivity : AppCompatActivity() {
 
     // ── Bulk ─────────────────────────────────────────────────────────────
     private fun bulk(action: String, title: String) {
-        val targets = lastDevices
-        if (targets.isEmpty()) { toast("No devices yet"); return }
+        val targets = lastDevices.filterNot { isExempt(it) }
+        if (targets.isEmpty()) {
+            toast(if (lastDevices.isEmpty()) "No devices yet" else "Only the admin device is present — nothing to $action")
+            return
+        }
+        val skipped = lastDevices.size - targets.size
+        val skipNote = if (skipped > 0) "\n\nYour admin device is exempt and will be skipped." else ""
         AlertDialog.Builder(this)
             .setTitle(title)
-            .setMessage("${targets.size} device(s) will receive \"$action\". Offline ones run when they reconnect.")
+            .setMessage("${targets.size} device(s) will receive \"$action\". Offline ones run when they reconnect.$skipNote")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Send to all") { _, _ ->
                 val db = RemoteDb(this)
