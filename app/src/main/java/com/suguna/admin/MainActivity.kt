@@ -183,6 +183,8 @@ class MainActivity : AppCompatActivity() {
             labels.add("📍  View location on map")
             actions.add { openMap(d) }
         }
+        labels.add("🗑️  Remove from panel")
+        actions.add { confirmRemove(d) }
 
         AlertDialog.Builder(this)
             .setTitle(d.name.ifBlank { d.id } + if (d.locked) "  🔒" else "")
@@ -203,6 +205,26 @@ class MainActivity : AppCompatActivity() {
                     .setNegativeButton("Cancel", null)
                     .setPositiveButton("Reset") { _, _ -> send(d.id, "factory_reset", d) }
                     .show()
+            }
+            .show()
+    }
+
+    private fun confirmRemove(d: RemoteDb.Device) {
+        AlertDialog.Builder(this)
+            .setTitle("Remove ${d.name.ifBlank { d.id }} from the panel?")
+            .setMessage("Deletes this record from the admin panel only — it does NOT touch the tablet. " +
+                "Use it to clear stale duplicates or old test entries. If the tablet is still running " +
+                "the app, it'll reappear at its next check-in.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Remove") { _, _ ->
+                val db = RemoteDb(this)
+                io.execute {
+                    val ok = db.removeDevice(d.id)
+                    ui.post {
+                        toast(if (ok) "Removed ${d.name.ifBlank { d.id }}" else "Failed — try again")
+                        if (ok) refreshOnce()
+                    }
+                }
             }
             .show()
     }

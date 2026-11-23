@@ -29,6 +29,7 @@ class RemoteDb(private val context: Context) {
         val enrollment: String,
         val model: String,
         val appVersion: String,
+        val androidId: String = "",
         val battery: Int,
         val lastSeen: Long,
         val lat: Double? = null,
@@ -65,6 +66,7 @@ class RemoteDb(private val context: Context) {
                     enrollment = o.optString("enrollment", ""),
                     model = o.optString("model", ""),
                     appVersion = o.optString("appVersion", ""),
+                    androidId = o.optString("androidId", ""),
                     battery = o.optInt("battery", -1),
                     lastSeen = o.optLong("lastSeen", 0L),
                     lat = if (o.has("lat")) o.optDouble("lat") else null,
@@ -77,8 +79,27 @@ class RemoteDb(private val context: Context) {
                 )
             )
         }
-        out.sortWith(compareByDescending<Device> { it.online }.thenBy { it.name.lowercase() })
-        return Fleet.Ok(out)
+        return Fleet.Ok(dedupe(out))
+    }
+
+    /**
+     * One physical tablet can hold several records: each fresh anonymous sign-in (after a reinstall
+     * or app-data clear) gets a new id. They all report the same stable androidId, so collapse them
+     * into the latest check-in per device. Records with no androidId (e.g. a diagnostic probe) are
+     * kept as-is so they stay visible and can be removed by hand.
+     */
+    private fun dedupe(list: List<Device>): List<Device> {
+        val byAndroid = LinkedHashMap<String, Device>()
+        val loose = ArrayList<Device>()
+        for (d in list) {
+            if (d.androidId.isBlank()) { loose.add(d); continue }
+            val keep = byAndroid[d.androidId]
+            if (keep == null || d.lastSeen > keep.lastSeen) byAndroid[d.androidId] = d
+        }
+        val merged = ArrayList<Device>(byAndroid.values)
+        merged.addAll(loose)
+        merged.sortWith(compareByDescending<Device> { it.online }.thenBy { it.name.lowercase() })
+        return merged
     }
 
     /** Queue a command for one tablet. It runs the next time the tablet is online. */
@@ -86,6 +107,12 @@ class RemoteDb(private val context: Context) {
         val tok = token() ?: return false
         val payload = JSONObject().put("action", action).put("ts", System.currentTimeMillis()).toString()
         return httpPut("$base/devices/$deviceId/command.json?auth=$tok", payload)
+    }
+
+    /** Delete a device record from the panel (stale duplicate, old agent record, test probe). */
+    fun removeDevice(deviceId: String): Boolean {
+        val tok = token() ?: return false
+        return httpDelete("$base/devices/$deviceId.json?auth=$tok")
     }
 
     // ── HTTP ─────────────────────────────────────────────────────────────
@@ -108,6 +135,14 @@ class RemoteDb(private val context: Context) {
         if (!ok) Log.w(TAG, "PUT ${c.responseCode}: ${c.errorStream?.bufferedReader()?.readText()}")
         c.disconnect(); ok
     } catch (e: Exception) { Log.w(TAG, "PUT failed: ${e.message}"); false }
+
+    private fun httpDelete(url: String): Boolean = try {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.requestMethod = "DELETE"; c.connectTimeout = 15000; c.readTimeout = 20000
+        val ok = c.responseCode in 200..299
+        if (!ok) Log.w(TAG, "DELETE ${c.responseCode}: ${c.errorStream?.bufferedReader()?.readText()}")
+        c.disconnect(); ok
+    } catch (e: Exception) { Log.w(TAG, "DELETE failed: ${e.message}"); false }
 
     private companion object { const val TAG = "RemoteDb" }
 }
