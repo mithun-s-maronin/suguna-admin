@@ -29,22 +29,34 @@ object FbAuth {
         data class Error(val message: String) : LoginResult()
     }
 
-    /** Sign in; if the account doesn't exist yet, create it (first-run). */
+    /**
+     * Log in. First-run creates the account. Because Firebase's email-enumeration protection
+     * hides whether an account exists (sign-in returns a generic "invalid credentials"), we try
+     * sign-in first, and on any non-network failure attempt to create the account. If creation
+     * reports the email already exists, the password was simply wrong.
+     */
     fun login(context: Context, email: String, password: String): LoginResult {
         val body = JSONObject()
             .put("email", email).put("password", password).put("returnSecureToken", true).toString()
+
+        // 1. Try to sign in to an existing account.
         val (code, resp) = post("$SIGNIN?key=${Config.FIREBASE_API_KEY}", body)
-        if (resp != null && code in 200..299) {
-            store(context, resp); return LoginResult.Ok
+        if (resp != null && code in 200..299) { store(context, resp); return LoginResult.Ok }
+
+        val signInErr = errorCode(resp)
+        if (signInErr == "NETWORK") return LoginResult.Error(friendly("NETWORK"))
+
+        // 2. Sign-in failed. Try to create the account (first-run). If it already exists, the
+        //    password was wrong; otherwise surface the real reason (weak password, bad email…).
+        val (c2, r2) = post("$SIGNUP?key=${Config.FIREBASE_API_KEY}", body)
+        if (r2 != null && c2 in 200..299) { store(context, r2); return LoginResult.Created }
+
+        val signUpErr = errorCode(r2)
+        return when {
+            signUpErr.startsWith("EMAIL_EXISTS") -> LoginResult.Error("Wrong password")
+            signUpErr == "NETWORK" -> LoginResult.Error(friendly("NETWORK"))
+            else -> LoginResult.Error(friendly(signUpErr))
         }
-        val err = errorCode(resp)
-        if (err == "EMAIL_NOT_FOUND") {
-            // First-time admin: create the account.
-            val (c2, r2) = post("$SIGNUP?key=${Config.FIREBASE_API_KEY}", body)
-            return if (r2 != null && c2 in 200..299) { store(context, r2); LoginResult.Created }
-            else LoginResult.Error(friendly(errorCode(r2)))
-        }
-        return LoginResult.Error(friendly(err))
     }
 
     /** A valid ID token for the logged-in admin, refreshing as needed. Null if logged out/offline. */
