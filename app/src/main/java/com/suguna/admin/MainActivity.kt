@@ -1,15 +1,14 @@
 package com.suguna.admin
 
-import android.annotation.SuppressLint
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -29,7 +28,8 @@ class MainActivity : AppCompatActivity() {
     private val io = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
     private var polling = false
-    private var unlocked = false
+    private var loggedIn = false
+    private var lastDevices: List<RemoteDb.Device> = emptyList()
 
     private val pollRunnable = object : Runnable {
         override fun run() {
@@ -50,78 +50,83 @@ class MainActivity : AppCompatActivity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = this@MainActivity.adapter
         }
+        findViewById<TextView>(R.id.menuBtn).setOnClickListener { showMenu(it) }
+        findViewById<TextView>(R.id.lockAll).setOnClickListener { bulk("lock", "Lock ALL devices?") }
 
-        when {
-            !prefs.isConfigured -> firstRunSetup()
-            prefs.boundDeviceId != androidId() -> lockedToAnotherDevice()
-            else -> promptPassword()
-        }
+        if (FbAuth.isLoggedIn(this)) onLoggedIn() else promptLogin()
     }
 
-    @SuppressLint("HardwareIds")
-    private fun androidId(): String =
-        Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "unknown"
-
-    // ── First-run setup: password + Firebase config, bound to this device ──
-    private fun firstRunSetup() {
-        subtitle.text = "First-time setup"
-        val pw = edit("Create admin password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
-        val pw2 = edit("Confirm password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
-        val url = edit("Firebase Database URL", InputType.TYPE_TEXT_VARIATION_URI)
-        val secret = edit("Firebase database secret", InputType.TYPE_CLASS_TEXT)
-        val box = column(pw, pw2, url, secret)
+    // ── Login ───────────────────────────────────────────────────────────────
+    private fun promptLogin(prefill: String = prefs.adminEmail) {
+        subtitle.text = "Sign in"
+        val email = edit("Admin email", InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS).apply { setText(prefill) }
+        val pass = edit("Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         AlertDialog.Builder(this)
-            .setTitle("Set up Suguna Admin")
-            .setMessage("This locks the app to THIS device. Keep the password safe.")
-            .setView(box)
+            .setTitle("Suguna Admin login")
+            .setMessage("Use the admin email in your database rules. First login creates the account.")
+            .setView(column(email, pass))
             .setCancelable(false)
-            .setPositiveButton("Save") { _, _ ->
-                val p = pw.text.toString()
-                when {
-                    p.length < 4 -> { toast("Password too short"); firstRunSetup() }
-                    p != pw2.text.toString() -> { toast("Passwords don't match"); firstRunSetup() }
-                    url.text.isBlank() || secret.text.isBlank() -> { toast("Enter Firebase URL and secret"); firstRunSetup() }
-                    else -> {
-                        prefs.setPassword(p)
-                        prefs.dbUrl = url.text.toString()
-                        prefs.dbSecret = secret.text.toString()
-                        prefs.boundDeviceId = androidId()
-                        unlock()
+            .setPositiveButton("Log in", null) // set below so it doesn't auto-dismiss on error
+            .setNegativeButton("Quit") { _, _ -> finish() }
+            .create().apply {
+                setOnShowListener {
+                    getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val e = email.text.toString().trim()
+                        val p = pass.text.toString()
+                        if (e.isBlank() || p.isBlank()) { toast("Enter email and password"); return@setOnClickListener }
+                        subtitle.text = "Signing in…"
+                        dismiss()
+                        io.execute {
+                            val r = FbAuth.login(this@MainActivity, e, p)
+                            ui.post {
+                                when (r) {
+                                    is FbAuth.LoginResult.Ok -> onLoggedIn()
+                                    is FbAuth.LoginResult.Created -> { toast("Admin account created"); onLoggedIn() }
+                                    is FbAuth.LoginResult.Error -> { toast(r.message); promptLogin(e) }
+                                }
+                            }
+                        }
                     }
                 }
-            }
-            .setNegativeButton("Quit") { _, _ -> finish() }
-            .show()
+            }.show()
     }
 
-    private fun lockedToAnotherDevice() {
-        subtitle.text = "Locked"
-        AlertDialog.Builder(this)
-            .setTitle("Locked to another device")
-            .setMessage("This admin app was set up on a different device and can't be used here.")
-            .setCancelable(false)
-            .setPositiveButton("Close") { _, _ -> finish() }
-            .show()
-    }
-
-    private fun promptPassword() {
-        subtitle.text = "Locked"
-        val pw = edit("Password", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
-        AlertDialog.Builder(this)
-            .setTitle("Enter admin password")
-            .setView(column(pw))
-            .setCancelable(false)
-            .setPositiveButton("Unlock") { _, _ ->
-                if (prefs.checkPassword(pw.text.toString())) unlock()
-                else { toast("Wrong password"); promptPassword() }
-            }
-            .setNegativeButton("Quit") { _, _ -> finish() }
-            .show()
-    }
-
-    private fun unlock() {
-        unlocked = true
+    private fun onLoggedIn() {
+        loggedIn = true
         startPolling()
+    }
+
+    private fun showMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add("Lock all devices")
+            menu.add("Unlock all devices")
+            menu.add("Refresh now")
+            menu.add("Log out")
+            setOnMenuItemClickListener { item ->
+                when (item.title) {
+                    "Lock all devices" -> bulk("lock", "Lock ALL devices?")
+                    "Unlock all devices" -> bulk("unlock", "Unlock ALL devices?")
+                    "Refresh now" -> refreshOnce()
+                    "Log out" -> logout()
+                }
+                true
+            }
+        }.show()
+    }
+
+    private fun logout() {
+        AlertDialog.Builder(this)
+            .setTitle("Log out?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Log out") { _, _ ->
+                polling = false
+                FbAuth.logout(this)
+                loggedIn = false
+                adapter.submit(emptyList())
+                onlinePill.text = "0 online"
+                promptLogin()
+            }
+            .show()
     }
 
     // ── Polling ───────────────────────────────────────────────────────────
@@ -132,19 +137,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshOnce() {
-        val db = RemoteDb(prefs.dbUrl, prefs.dbSecret)
+        val db = RemoteDb(this)
         io.execute {
-            val devices = try { db.listDevices() } catch (e: Exception) { null }
+            val fleet = try { db.listDevices() } catch (e: Exception) { RemoteDb.Fleet.Unreachable }
             ui.post {
-                if (devices == null) {
-                    subtitle.text = "Can't reach the server — check connection/config"
-                    return@post
+                when (fleet) {
+                    is RemoteDb.Fleet.AuthError ->
+                        subtitle.text = "Access denied — your admin email must match the database rules"
+                    is RemoteDb.Fleet.Unreachable ->
+                        subtitle.text = "Can't reach the database — check your connection"
+                    is RemoteDb.Fleet.Ok -> {
+                        lastDevices = fleet.devices
+                        adapter.submit(fleet.devices)
+                        val online = fleet.devices.count { it.online }
+                        val who = prefs.adminEmail.ifBlank { "admin" }
+                        subtitle.text = "${fleet.devices.size} device(s) • signed in as $who"
+                        onlinePill.text = "$online online"
+                        empty.visibility = if (fleet.devices.isEmpty()) View.VISIBLE else View.GONE
+                    }
                 }
-                adapter.submit(devices)
-                val online = devices.count { it.online }
-                subtitle.text = "${devices.size} device(s) registered • updated just now"
-                onlinePill.text = "$online online"
-                empty.visibility = if (devices.isEmpty()) View.VISIBLE else View.GONE
             }
         }
     }
@@ -154,46 +165,87 @@ class MainActivity : AppCompatActivity() {
         val labels = ArrayList<String>()
         val actions = ArrayList<() -> Unit>()
 
-        if (d.online) {
-            labels.add("Lock now  (student can unlock)")
-            actions.add {
-                confirmAndSend(d, "lock", "Lock ${d.name}?",
-                    "The tablet locks immediately. The student can unlock it normally.")
-            }
-            if (d.permanentlyLocked) {
-                labels.add("Unlock  (release permanent lock)")
-                actions.add {
-                    confirmAndSend(d, "unlock", "Unlock ${d.name}?",
-                        "Removes the permanent lock so the tablet can be used again.")
-                }
-            } else {
-                labels.add("Lock permanently  (only you can unlock)")
-                actions.add {
-                    confirmAndSend(d, "lock_permanent", "Lock ${d.name} permanently?",
-                        "A full-screen lock stays up until you tap Unlock here. " +
-                            "The student cannot get past it.")
-                }
-            }
+        if (d.locked) {
+            labels.add("🔓  Unlock")
+            actions.add { confirmAndSend(d, "unlock", "Unlock ${d.name}?",
+                "Releases the lock so the tablet can be used again.") }
+        } else {
+            labels.add("🔒  Lock (only you can unlock)")
+            actions.add { confirmAndSend(d, "lock", "Lock ${d.name}?",
+                "A full-screen lock stays up until you unlock it here. The student can't get past it.") }
         }
+        labels.add("🔑  Reset screen lock")
+        actions.add { confirmAndSend(d, "reset_screen_lock", "Reset screen lock on ${d.name}?",
+            "Clears the tablet's screen PIN/password so a locked-out student can get back in.") }
+        labels.add("♻️  Factory reset")
+        actions.add { confirmFactoryReset(d) }
         if (d.hasLocation) {
-            labels.add("View location on map")
+            labels.add("📍  View location on map")
             actions.add { openMap(d) }
         }
 
-        if (labels.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle(d.name)
-                .setMessage("This device is OFFLINE and has no location yet. " +
-                    "Lock commands run only when it is online.")
-                .setPositiveButton("OK", null)
-                .show()
-            return
-        }
-
         AlertDialog.Builder(this)
-            .setTitle(d.name + if (d.permanentlyLocked) "  🔒 locked" else "")
+            .setTitle(d.name.ifBlank { d.id } + if (d.locked) "  🔒" else "")
             .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun confirmFactoryReset(d: RemoteDb.Device) {
+        AlertDialog.Builder(this)
+            .setTitle("Factory reset ${d.name}?")
+            .setMessage("This ERASES the tablet and cannot be undone.")
             .setNegativeButton("Cancel", null)
+            .setPositiveButton("Continue") { _, _ ->
+                AlertDialog.Builder(this)
+                    .setTitle("Are you sure?")
+                    .setMessage("Everything on ${d.name} will be wiped.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Reset") { _, _ -> send(d.id, "factory_reset", d) }
+                    .show()
+            }
+            .show()
+    }
+
+    private fun confirmAndSend(d: RemoteDb.Device, action: String, title: String, msg: String) {
+        val queued = if (!d.online) "\n\nThis tablet is offline — it'll run as soon as it comes online." else ""
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(msg + queued)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Send") { _, _ -> send(d.id, action, d) }
+            .show()
+    }
+
+    private fun send(id: String, action: String, d: RemoteDb.Device) {
+        val db = RemoteDb(this)
+        io.execute {
+            val ok = db.sendCommand(id, action)
+            ui.post {
+                toast(if (ok) {
+                    if (d.online) "Sent to ${d.name}" else "Queued for ${d.name} (offline)"
+                } else "Failed — try again")
+                if (ok) refreshOnce()
+            }
+        }
+    }
+
+    // ── Bulk ─────────────────────────────────────────────────────────────
+    private fun bulk(action: String, title: String) {
+        val targets = lastDevices
+        if (targets.isEmpty()) { toast("No devices yet"); return }
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage("${targets.size} device(s) will receive \"$action\". Offline ones run when they reconnect.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Send to all") { _, _ ->
+                val db = RemoteDb(this)
+                io.execute {
+                    var ok = 0
+                    for (d in targets) if (db.sendCommand(d.id, action)) ok++
+                    ui.post { toast("Sent to $ok/${targets.size}"); refreshOnce() }
+                }
+            }
             .show()
     }
 
@@ -204,27 +256,9 @@ class MainActivity : AppCompatActivity() {
         try {
             startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
         } catch (e: Exception) {
-            // No maps app — fall back to a browser link.
             val web = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng")
             try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, web)) }
             catch (e2: Exception) { toast("No app can open maps") }
-        }
-    }
-
-    private fun confirmAndSend(d: RemoteDb.Device, action: String, title: String, msg: String) {
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(msg)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Send") { _, _ -> send(d, action) }
-            .show()
-    }
-
-    private fun send(d: RemoteDb.Device, action: String) {
-        val db = RemoteDb(prefs.dbUrl, prefs.dbSecret)
-        io.execute {
-            val ok = db.sendCommand(d.id, action)
-            ui.post { toast(if (ok) "Sent \"$action\" to ${d.name}" else "Failed to send — try again") }
         }
     }
 
@@ -238,7 +272,6 @@ class MainActivity : AppCompatActivity() {
         orientation = LinearLayout.VERTICAL
         val pad = (20 * resources.displayMetrics.density).toInt()
         setPadding(pad, pad / 2, pad, 0)
-        gravity = Gravity.CENTER_HORIZONTAL
         views.forEach { addView(it) }
     }
 
@@ -246,7 +279,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (unlocked) startPolling()
+        if (loggedIn) startPolling()
     }
 
     override fun onPause() {

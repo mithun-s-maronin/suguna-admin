@@ -66,8 +66,28 @@ class DeviceAdapter(
             h.locLine.visibility = View.VISIBLE
         } else h.locLine.visibility = View.GONE
 
-        h.lockBadge.visibility = if (d.permanentlyLocked) View.VISIBLE else View.GONE
+        when {
+            d.hasPending -> {
+                h.lockBadge.text = "⏳ Pending: ${prettyCmd(d.pendingCommand)}"
+                h.lockBadge.setTextColor(ctx.getColor(R.color.accent))
+                h.lockBadge.visibility = View.VISIBLE
+            }
+            d.locked -> {
+                h.lockBadge.text = "🔒 Locked"
+                h.lockBadge.setTextColor(ctx.getColor(R.color.offline))
+                h.lockBadge.visibility = View.VISIBLE
+            }
+            else -> h.lockBadge.visibility = View.GONE
+        }
 
         h.itemView.setOnClickListener { onClick(d) }
+    }
+
+    private fun prettyCmd(action: String): String = when (action) {
+        "lock" -> "lock"
+        "unlock" -> "unlock"
+        "factory_reset" -> "factory reset"
+        "reset_screen_lock" -> "reset screen lock"
+        else -> action
     }
 }
