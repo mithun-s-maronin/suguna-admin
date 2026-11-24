@@ -140,7 +140,7 @@ class RemoteDb(private val context: Context) {
         } catch (e: Exception) { Binding.Error }
     }
 
-    /** Claim (or transfer) the panel to this device. */
+    /** Claim the panel for this device (only used when no device has claimed it yet). */
     fun writeBinding(androidId: String, label: String): Boolean {
         val tok = token() ?: return false
         val payload = JSONObject()
@@ -149,6 +149,12 @@ class RemoteDb(private val context: Context) {
             .put("boundAt", System.currentTimeMillis())
             .toString()
         return httpPut("$base/devices/$ADMIN_NODE.json?auth=$tok", payload)
+    }
+
+    /** Release the single-device lock so the panel can be activated on a different device. */
+    fun clearBinding(): Boolean {
+        val tok = token() ?: return false
+        return httpDelete("$base/devices/$ADMIN_NODE.json?auth=$tok")
     }
 
     // ── HTTP ─────────────────────────────────────────────────────────────

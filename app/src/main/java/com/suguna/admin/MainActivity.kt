@@ -145,25 +145,32 @@ class MainActivity : AppCompatActivity() {
         subtitle.text = "Locked to another device"
         AlertDialog.Builder(this)
             .setTitle("Panel locked to another device")
-            .setMessage("This admin panel is already activated on \"$otherLabel\". Only one device can run it at a time.")
+            .setMessage("This admin panel is activated on \"$otherLabel\", and only that device can use it.\n\n" +
+                "To move the panel here, open it on \"$otherLabel\" and choose ⋮ → \"Release this device\" " +
+                "(or delete /devices/__admin__ in the Firebase console), then tap Retry.")
             .setCancelable(false)
             .setNegativeButton("Log out") { _, _ -> logout() }
-            .setPositiveButton("Use this device instead") { _, _ ->
-                AlertDialog.Builder(this)
-                    .setTitle("Switch the panel to this device?")
-                    .setMessage("\"$otherLabel\" will stop working as the admin panel. Continue?")
-                    .setNegativeButton("Cancel") { _, _ -> showActivationBlock(otherLabel) }
-                    .setPositiveButton("Switch") { _, _ ->
-                        val db = RemoteDb(this)
-                        io.execute {
-                            val ok = db.writeBinding(thisDeviceId(), thisDeviceLabel())
-                            ui.post {
-                                if (ok) { toast("Panel moved to this device"); startPolling() }
-                                else showActivationBlock(otherLabel)
-                            }
-                        }
+            .setPositiveButton("Retry") { _, _ -> checkActivation() }
+            .show()
+    }
+
+    private fun confirmRelease() {
+        AlertDialog.Builder(this)
+            .setTitle("Release this device?")
+            .setMessage("Un-links the panel from this tablet so you can activate it on a different one. " +
+                "You'll be logged out, and the next device to log in becomes the panel.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Release") { _, _ ->
+                val db = RemoteDb(this)
+                io.execute {
+                    val ok = db.clearBinding()
+                    ui.post {
+                        if (ok) {
+                            toast("Released — the panel can now be activated on another device")
+                            doLogout()
+                        } else toast("Couldn't release — try again")
                     }
-                    .show()
+                }
             }
             .show()
     }
@@ -173,12 +180,14 @@ class MainActivity : AppCompatActivity() {
             menu.add("Lock all devices")
             menu.add("Unlock all devices")
             menu.add("Refresh now")
+            menu.add("Release this device")
             menu.add("Log out")
             setOnMenuItemClickListener { item ->
                 when (item.title) {
                     "Lock all devices" -> bulk("lock", "Lock ALL devices?")
                     "Unlock all devices" -> bulk("unlock", "Unlock ALL devices?")
                     "Refresh now" -> refreshOnce()
+                    "Release this device" -> confirmRelease()
                     "Log out" -> logout()
                 }
                 true
@@ -190,15 +199,17 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Log out?")
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Log out") { _, _ ->
-                polling = false
-                FbAuth.logout(this)
-                loggedIn = false
-                adapter.submit(emptyList())
-                onlinePill.text = "0 online"
-                promptLogin()
-            }
+            .setPositiveButton("Log out") { _, _ -> doLogout() }
             .show()
+    }
+
+    private fun doLogout() {
+        polling = false
+        FbAuth.logout(this)
+        loggedIn = false
+        adapter.submit(emptyList())
+        onlinePill.text = "0 online"
+        promptLogin()
     }
 
     // ── Polling ───────────────────────────────────────────────────────────
@@ -241,11 +252,12 @@ class MainActivity : AppCompatActivity() {
         if (d.locked) {
             labels.add("🔓  Unlock")
             actions.add { confirmAndSend(d, "unlock", "Unlock ${d.name}?",
-                "Releases the lock so the tablet can be used again.") }
+                "Re-enables the admin/exit panel on the tablet.") }
         } else {
             labels.add("🔒  Lock (only you can unlock)")
             actions.add { confirmAndSend(d, "lock", "Lock ${d.name}?",
-                "A full-screen lock stays up until you unlock it here. The student can't get past it.") }
+                "Sends the tablet to the MDM home and seals the admin/exit panel so it can't leave the MDM. " +
+                "Apps and buttons still work. Only you can unlock it here.") }
         }
         labels.add("🔑  Reset screen lock")
         actions.add { confirmAndSend(d, "reset_screen_lock", "Reset screen lock on ${d.name}?",
