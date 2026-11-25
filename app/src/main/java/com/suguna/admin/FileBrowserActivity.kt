@@ -75,6 +75,7 @@ class FileBrowserActivity : AppCompatActivity() {
         val list = ListView(this).apply {
             this.adapter = this@FileBrowserActivity.adapter
             setOnItemClickListener { _, _, pos, _ -> onRowTap(pos) }
+            setOnItemLongClickListener { _, _, pos, _ -> onRowLongTap(pos); true }
         }
         root.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
@@ -119,13 +120,33 @@ class FileBrowserActivity : AppCompatActivity() {
         if (e.optBoolean("d")) navigate(full) else fileMenu(name, full, e.optLong("s"))
     }
 
+    /** Long-press any row → actions, incl. Delete for folders (which tap can't reach). */
+    private fun onRowLongTap(pos: Int) {
+        val e = rows.getOrNull(pos) ?: return
+        val name = e.optString("n")
+        val full = "${currentPath.trimEnd('/')}/$name"
+        val isDir = e.optBoolean("d")
+        val items = if (isDir) arrayOf("🗑 Delete folder") else arrayOf("⬇ Download", "🗑 Delete")
+        AlertDialog.Builder(this)
+            .setTitle(name)
+            .setItems(items) { _, which ->
+                when {
+                    isDir -> confirmDelete(name, full, true)
+                    which == 0 -> download(name, full, e.optLong("s"))
+                    else -> confirmDelete(name, full, false)
+                }
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
     private fun fileMenu(name: String, full: String, size: Long) {
         AlertDialog.Builder(this)
             .setTitle(name)
             .setItems(arrayOf("⬇ Download", "🗑 Delete")) { _, which ->
                 when (which) {
                     0 -> download(name, full, size)
-                    1 -> confirmDelete(name, full)
+                    1 -> confirmDelete(name, full, false)
                 }
             }
             .setNegativeButton("Close", null)
@@ -145,13 +166,16 @@ class FileBrowserActivity : AppCompatActivity() {
         }
     }
 
-    private fun confirmDelete(name: String, full: String) {
+    private fun confirmDelete(name: String, full: String, isDir: Boolean) {
         AlertDialog.Builder(this)
             .setTitle("Delete \"$name\"?")
-            .setMessage("Deletes it from the tablet. Can't be undone.")
+            .setMessage(
+                if (isDir) "Deletes this folder AND everything inside it from the tablet. Can't be undone."
+                else "Deletes it from the tablet. Can't be undone.",
+            )
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Delete") { _, _ ->
-                request("delete_file", full, null) { toast("Deleted"); navigate(currentPath) }
+                request("delete_file", full, null) { toast("Deleted \"$name\""); navigate(currentPath) }
             }
             .show()
     }
