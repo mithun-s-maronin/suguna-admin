@@ -355,6 +355,8 @@ class MainActivity : AppCompatActivity() {
                 "Sends the tablet to the MDM home and seals the admin/exit panel so it can't leave the MDM. " +
                 "Apps and buttons still work. Only you can unlock it here.") }
         }
+        labels.add("📂  Browse files")
+        actions.add { openFileBrowser(d) }
         labels.add("🔑  Reset screen lock")
         actions.add { confirmAndSend(d, "reset_screen_lock", "Reset screen lock on ${d.name}?",
             "Clears the tablet's screen PIN/password so a locked-out student can get back in.") }
@@ -510,6 +512,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .show()
+    }
+
+    private fun openFileBrowser(d: RemoteDb.Device) {
+        startActivity(
+            android.content.Intent(this, FileBrowserActivity::class.java)
+                .putExtra("deviceId", d.id)
+                .putExtra("deviceName", d.name.ifBlank { d.id }),
+        )
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────

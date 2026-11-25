@@ -115,6 +115,24 @@ class RemoteDb(private val context: Context) {
         return httpPut("$base/devices/$deviceId/command.json?auth=$tok", payload)
     }
 
+    /** Queue a file-browser command (list_dir/read_file/delete_file/write_file). Returns reqId or null. */
+    fun sendFileCmd(deviceId: String, action: String, path: String, b64: String? = null): String? {
+        val tok = token() ?: return null
+        val reqId = System.nanoTime().toString()
+        val payload = JSONObject()
+            .put("action", action).put("reqId", reqId).put("path", path).put("ts", System.currentTimeMillis())
+        if (b64 != null) payload.put("b64", b64)
+        return if (httpPut("$base/devices/$deviceId/command.json?auth=$tok", payload.toString())) reqId else null
+    }
+
+    /** The device's latest file-op result (matched by reqId on the caller's side), or null. */
+    fun readFileResult(deviceId: String): JSONObject? {
+        val tok = token() ?: return null
+        val (code, body) = httpGet("$base/devices/$deviceId/fileResult.json?auth=$tok")
+        if (code !in 200..299 || body == null || body.isBlank() || body == "null") return null
+        return try { JSONObject(body) } catch (e: Exception) { null }
+    }
+
     /** Delete a device record from the panel (stale duplicate, old agent record, test probe). */
     fun removeDevice(deviceId: String): Boolean {
         val tok = token() ?: return false
