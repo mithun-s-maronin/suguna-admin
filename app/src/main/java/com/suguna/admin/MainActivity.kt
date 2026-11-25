@@ -388,17 +388,30 @@ class MainActivity : AppCompatActivity() {
     // ── Bulk ─────────────────────────────────────────────────────────────
     private fun bulk(action: String, title: String) {
         val targets = lastDevices.filterNot { isExempt(it) }
+        val exempt = lastDevices.filter { isExempt(it) }
         if (targets.isEmpty()) {
-            toast(if (lastDevices.isEmpty()) "No devices yet" else "Only the admin device is present — nothing to $action")
+            toast(if (lastDevices.isEmpty()) "No devices yet" else "Only admin device(s) present — nothing to $action")
             return
         }
-        val skipped = lastDevices.size - targets.size
-        val skipNote = if (skipped > 0) "\n\nYour admin device is exempt and will be skipped." else ""
+        val verb = if (action == "lock") "LOCKED" else "UNLOCKED"
+        fun names(list: List<RemoteDb.Device>): String {
+            val shown = list.take(20).joinToString("\n") { "•  ${it.name.ifBlank { it.id }}" }
+            return if (list.size > 20) "$shown\n…and ${list.size - 20} more" else shown
+        }
+        val sb = StringBuilder("These ${targets.size} device(s) will be $verb:\n${names(targets)}")
+        if (exempt.isNotEmpty()) {
+            sb.append("\n\n⭐ Skipped (admin device${if (exempt.size > 1) "s" else ""}):\n${names(exempt)}")
+        } else {
+            sb.append("\n\n⚠ No admin device is set — this will $action EVERY device above, " +
+                "including your own control tablet if it's in the list. To exclude it, Cancel and use " +
+                "⋮ → \"Admin devices\" first.")
+        }
+        sb.append("\n\nOffline ones run when they reconnect.")
         AlertDialog.Builder(this)
             .setTitle(title)
-            .setMessage("${targets.size} device(s) will receive \"$action\". Offline ones run when they reconnect.$skipNote")
+            .setMessage(sb.toString())
             .setNegativeButton("Cancel", null)
-            .setPositiveButton("Send to all") { _, _ ->
+            .setPositiveButton("$verb ${targets.size}") { _, _ ->
                 val db = RemoteDb(this)
                 io.execute {
                     var ok = 0
