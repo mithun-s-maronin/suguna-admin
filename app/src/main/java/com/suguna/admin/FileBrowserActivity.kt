@@ -65,7 +65,13 @@ class FileBrowserActivity : AppCompatActivity() {
         bar.addView(Button(this).apply { text = "⬆ Upload"; setOnClickListener { pickUpload() } }, barLp())
         root.addView(bar)
 
-        adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, ArrayList())
+        adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, ArrayList()) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val v = super.getView(position, convertView, parent)
+                (v as? TextView)?.apply { setTextColor(Color.WHITE); textSize = 16f }
+                return v
+            }
+        }
         val list = ListView(this).apply {
             this.adapter = this@FileBrowserActivity.adapter
             setOnItemClickListener { _, _, pos, _ -> onRowTap(pos) }
