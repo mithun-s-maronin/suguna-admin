@@ -179,6 +179,7 @@ class MainActivity : AppCompatActivity() {
         PopupMenu(this, anchor).apply {
             menu.add("Lock all devices")
             menu.add("Unlock all devices")
+            menu.add("Admin devices (skip \"Lock all\")")
             menu.add("Refresh now")
             menu.add("Release this device")
             menu.add("Log out")
@@ -186,6 +187,7 @@ class MainActivity : AppCompatActivity() {
                 when (item.title) {
                     "Lock all devices" -> bulk("lock", "Lock ALL devices?")
                     "Unlock all devices" -> bulk("unlock", "Unlock ALL devices?")
+                    "Admin devices (skip \"Lock all\")" -> manageAdminDevices()
                     "Refresh now" -> refreshOnce()
                     "Release this device" -> confirmRelease()
                     "Log out" -> logout()
@@ -324,6 +326,31 @@ class MainActivity : AppCompatActivity() {
     // ── Admin-device exemption (skipped by bulk actions) ─────────────────────
     private fun keyOf(d: RemoteDb.Device): String = d.androidId.ifBlank { d.id }
     private fun isExempt(d: RemoteDb.Device): Boolean = keyOf(d) in prefs.exemptKeys
+
+    /** A clear, dedicated picker for which devices "Lock all" / "Unlock all" should skip. */
+    private fun manageAdminDevices() {
+        val devices = lastDevices
+        if (devices.isEmpty()) { toast("No devices yet — refresh and try again"); return }
+        val names = devices.map {
+            (it.name.ifBlank { it.id }) + (if (it.online) "  • online" else "")
+        }.toTypedArray()
+        val checked = devices.map { isExempt(it) }.toBooleanArray()
+        AlertDialog.Builder(this)
+            .setTitle("Admin devices — skip \"Lock all\"")
+            .setMultiChoiceItems(names, checked) { _, which, isChecked -> checked[which] = isChecked }
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val keys = prefs.exemptKeys.toMutableSet()
+                devices.forEachIndexed { i, d -> if (checked[i]) keys.add(keyOf(d)) else keys.remove(keyOf(d)) }
+                prefs.exemptKeys = keys
+                adapter.exemptKeys = keys
+                adapter.submit(lastDevices)
+                val n = devices.count { isExempt(it) }
+                toast(if (n == 0) "No admin devices — bulk actions hit everything"
+                      else "$n admin device(s) will be skipped by Lock all / Unlock all")
+            }
+            .show()
+    }
 
     private fun setExempt(d: RemoteDb.Device, exempt: Boolean) {
         val keys = prefs.exemptKeys.toMutableSet()
