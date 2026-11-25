@@ -154,6 +154,98 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // ── Push app updates (silent install via Device Owner) ───────────────────
+    private fun pushAppUpdate() {
+        val presets = prefs.appPresets
+        val labels = presets.map { "📦  ${it.first}" }.toMutableList()
+        labels.add("➕  Add / edit apps…")
+        AlertDialog.Builder(this)
+            .setTitle("Push app update")
+            .setItems(labels.toTypedArray()) { _, which ->
+                if (which == presets.size) editAppPresets()
+                else choosePushTarget(presets[which].first, presets[which].second)
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun choosePushTarget(name: String, url: String) {
+        val targets = lastDevices.filterNot { isExempt(it) }
+        AlertDialog.Builder(this)
+            .setTitle("Install \"$name\"")
+            .setMessage("Silently download + install on the tablets (Device Owner — no prompts).\n\n" +
+                "Updating an app that's already installed needs the SAME signing key as the installed " +
+                "version, or it can only go on as a new app.\n\nURL:\n$url")
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("One device…") { _, _ -> pickDeviceForInstall(name, url) }
+            .setPositiveButton("All (${targets.size})") { _, _ -> sendInstallToAll(name, url) }
+            .show()
+    }
+
+    private fun sendInstallToAll(name: String, url: String) {
+        val targets = lastDevices.filterNot { isExempt(it) }
+        if (targets.isEmpty()) { toast("No target devices"); return }
+        val db = RemoteDb(this)
+        io.execute {
+            var ok = 0
+            for (d in targets) if (db.sendInstall(d.id, url, name)) ok++
+            ui.post { toast("Install queued on $ok/${targets.size}"); refreshOnce() }
+        }
+    }
+
+    private fun pickDeviceForInstall(name: String, url: String) {
+        val devices = lastDevices
+        if (devices.isEmpty()) { toast("No devices"); return }
+        val names = devices.map { it.name.ifBlank { it.id } + (if (it.online) "  • online" else "") }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Install \"$name\" on…")
+            .setItems(names) { _, which ->
+                val d = devices[which]
+                val db = RemoteDb(this)
+                io.execute {
+                    val ok = db.sendInstall(d.id, url, name)
+                    ui.post { toast(if (ok) "Queued on ${d.name.ifBlank { d.id }}" else "Failed"); refreshOnce() }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun editAppPresets() {
+        val presets = prefs.appPresets.toMutableList()
+        val labels = presets.map { "${it.first}\n${it.second}" }.toMutableList()
+        labels.add("➕  Add new app")
+        AlertDialog.Builder(this)
+            .setTitle("Apps (name + APK URL)")
+            .setItems(labels.toTypedArray()) { _, which ->
+                addOrEditPreset(if (which == presets.size) null else which)
+            }
+            .setNegativeButton("Done", null)
+            .show()
+    }
+
+    private fun addOrEditPreset(index: Int?) {
+        val presets = prefs.appPresets.toMutableList()
+        val existing = index?.let { presets[it] }
+        val nameE = edit("App name (e.g. Z Exam)", InputType.TYPE_CLASS_TEXT).apply { existing?.let { setText(it.first) } }
+        val urlE = edit("Direct APK URL (https://…)", InputType.TYPE_TEXT_VARIATION_URI).apply { existing?.let { setText(it.second) } }
+        val b = AlertDialog.Builder(this)
+            .setTitle(if (existing == null) "Add app" else "Edit app")
+            .setView(column(nameE, urlE))
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val n = nameE.text.toString().trim(); val u = urlE.text.toString().trim()
+                if (n.isBlank() || !u.startsWith("http")) { toast("Enter a name and an https:// URL"); return@setPositiveButton }
+                if (index == null) presets.add(n to u) else presets[index] = n to u
+                prefs.appPresets = presets
+                toast("Saved")
+            }
+        if (existing != null) b.setNeutralButton("Delete") { _, _ ->
+            presets.removeAt(index!!); prefs.appPresets = presets; toast("Deleted")
+        }
+        b.show()
+    }
+
     private fun confirmRelease() {
         AlertDialog.Builder(this)
             .setTitle("Release this device?")
@@ -180,6 +272,7 @@ class MainActivity : AppCompatActivity() {
             menu.add("Lock all devices")
             menu.add("Unlock all devices")
             menu.add("Admin devices (skip \"Lock all\")")
+            menu.add("Push app update")
             menu.add("Refresh now")
             menu.add("Release this device")
             menu.add("Log out")
@@ -188,6 +281,7 @@ class MainActivity : AppCompatActivity() {
                     "Lock all devices" -> bulk("lock", "Lock ALL devices?")
                     "Unlock all devices" -> bulk("unlock", "Unlock ALL devices?")
                     "Admin devices (skip \"Lock all\")" -> manageAdminDevices()
+                    "Push app update" -> pushAppUpdate()
                     "Refresh now" -> refreshOnce()
                     "Release this device" -> confirmRelease()
                     "Log out" -> logout()

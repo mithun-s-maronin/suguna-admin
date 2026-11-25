@@ -25,4 +25,11 @@ class Prefs(context: Context) {
         get() = (sp.getString("exempt_keys", "") ?: "")
             .split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
         set(v) = sp.edit().putString("exempt_keys", v.joinToString(",")).apply()
+
+    /** Saved app-update entries: (name, download URL). Each line is "name|url". */
+    var appPresets: List<Pair<String, String>>
+        get() = (sp.getString("app_presets", "") ?: "").split("\n").mapNotNull {
+            val i = it.indexOf('|'); if (i <= 0 || i == it.length - 1) null else it.substring(0, i) to it.substring(i + 1)
+        }
+        set(v) = sp.edit().putString("app_presets", v.joinToString("\n") { "${it.first}|${it.second}" }).apply()
 }

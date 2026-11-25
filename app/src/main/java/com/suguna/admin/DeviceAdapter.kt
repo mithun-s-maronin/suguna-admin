@@ -81,6 +81,11 @@ class DeviceAdapter(
                 h.lockBadge.setTextColor(ctx.getColor(R.color.offline))
                 h.lockBadge.visibility = View.VISIBLE
             }
+            d.lastInstall.isNotBlank() -> {
+                h.lockBadge.text = "⬇ ${d.lastInstall}"
+                h.lockBadge.setTextColor(ctx.getColor(R.color.accent))
+                h.lockBadge.visibility = View.VISIBLE
+            }
             else -> h.lockBadge.visibility = View.GONE
         }
 
@@ -92,6 +97,7 @@ class DeviceAdapter(
         "unlock" -> "unlock"
         "factory_reset" -> "factory reset"
         "reset_screen_lock" -> "reset screen lock"
+        "install_apk" -> "app install"
         else -> action
     }
 }

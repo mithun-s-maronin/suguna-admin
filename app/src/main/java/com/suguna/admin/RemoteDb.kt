@@ -39,6 +39,7 @@ class RemoteDb(private val context: Context) {
         val currentApp: String = "",
         val lockState: String = "none",
         val pendingCommand: String = "",
+        val lastInstall: String = "",
     ) {
         /** Online if it checked in within the last 2 minutes. */
         val online: Boolean get() = System.currentTimeMillis() - lastSeen < 120_000L
@@ -77,6 +78,7 @@ class RemoteDb(private val context: Context) {
                     currentApp = o.optString("currentApp", ""),
                     lockState = o.optString("lockState", "none"),
                     pendingCommand = o.optJSONObject("command")?.optString("action", "") ?: "",
+                    lastInstall = o.optString("lastInstall", ""),
                 )
             )
         }
@@ -107,6 +109,18 @@ class RemoteDb(private val context: Context) {
     fun sendCommand(deviceId: String, action: String): Boolean {
         val tok = token() ?: return false
         val payload = JSONObject().put("action", action).put("ts", System.currentTimeMillis()).toString()
+        return httpPut("$base/devices/$deviceId/command.json?auth=$tok", payload)
+    }
+
+    /** Queue a silent app install/update from a download URL. */
+    fun sendInstall(deviceId: String, url: String, label: String): Boolean {
+        val tok = token() ?: return false
+        val payload = JSONObject()
+            .put("action", "install_apk")
+            .put("url", url)
+            .put("label", label)
+            .put("ts", System.currentTimeMillis())
+            .toString()
         return httpPut("$base/devices/$deviceId/command.json?auth=$tok", payload)
     }
 
