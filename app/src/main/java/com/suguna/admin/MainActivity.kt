@@ -360,10 +360,6 @@ class MainActivity : AppCompatActivity() {
             "Clears the tablet's screen PIN/password so a locked-out student can get back in.") }
         labels.add("♻️  Factory reset")
         actions.add { confirmFactoryReset(d) }
-        if (d.hasLocation) {
-            labels.add("📍  View location on map")
-            actions.add { openMap(d) }
-        }
         if (isExempt(d)) {
             labels.add("⭐  Admin device — remove flag")
             actions.add { setExempt(d, false) }
@@ -514,19 +510,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .show()
-    }
-
-    private fun openMap(d: RemoteDb.Device) {
-        val lat = d.lat ?: return
-        val lng = d.lng ?: return
-        val uri = android.net.Uri.parse("geo:$lat,$lng?q=$lat,$lng(${android.net.Uri.encode(d.name)})")
-        try {
-            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
-        } catch (e: Exception) {
-            val web = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng")
-            try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, web)) }
-            catch (e2: Exception) { toast("No app can open maps") }
-        }
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────

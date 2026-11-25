@@ -32,10 +32,6 @@ class RemoteDb(private val context: Context) {
         val androidId: String = "",
         val battery: Int,
         val lastSeen: Long,
-        val lat: Double? = null,
-        val lng: Double? = null,
-        val locAccuracy: Int = -1,
-        val locTime: Long = 0L,
         val currentApp: String = "",
         val lockState: String = "none",
         val pendingCommand: String = "",
@@ -44,7 +40,6 @@ class RemoteDb(private val context: Context) {
         /** Online if it checked in within the last 2 minutes. */
         val online: Boolean get() = System.currentTimeMillis() - lastSeen < 120_000L
         val locked: Boolean get() = lockState == "locked"
-        val hasLocation: Boolean get() = lat != null && lng != null
         val hasPending: Boolean get() = pendingCommand.isNotBlank()
         /** "App Label" out of the "Label|package" the tablet reports (falls back to the package). */
         val currentAppLabel: String get() = currentApp.substringBefore('|', currentApp)
@@ -71,10 +66,6 @@ class RemoteDb(private val context: Context) {
                     androidId = o.optString("androidId", ""),
                     battery = o.optInt("battery", -1),
                     lastSeen = o.optLong("lastSeen", 0L),
-                    lat = if (o.has("lat")) o.optDouble("lat") else null,
-                    lng = if (o.has("lng")) o.optDouble("lng") else null,
-                    locAccuracy = o.optInt("locAccuracy", -1),
-                    locTime = o.optLong("locTime", 0L),
                     currentApp = o.optString("currentApp", ""),
                     lockState = o.optString("lockState", "none"),
                     pendingCommand = o.optJSONObject("command")?.optString("action", "") ?: "",

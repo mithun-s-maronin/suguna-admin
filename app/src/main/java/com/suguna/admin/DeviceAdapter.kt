@@ -64,11 +64,7 @@ class DeviceAdapter(
             h.appLine.visibility = View.VISIBLE
         } else h.appLine.visibility = View.GONE
 
-        if (d.hasLocation) {
-            val acc = if (d.locAccuracy > 0) "  (±${d.locAccuracy}m)" else ""
-            h.locLine.text = "📍 ${"%.5f".format(d.lat)}, ${"%.5f".format(d.lng)}$acc"
-            h.locLine.visibility = View.VISIBLE
-        } else h.locLine.visibility = View.GONE
+        h.locLine.visibility = View.GONE   // location reporting was removed from the MDM
 
         when {
             d.hasPending -> {
