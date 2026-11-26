@@ -548,5 +548,5 @@ class MainActivity : AppCompatActivity() {
         ui.removeCallbacks(pollRunnable)
     }
 
-    companion object { private const val POLL_MS = 10_000L }
+    companion object { private const val POLL_MS = 6_000L }
 }

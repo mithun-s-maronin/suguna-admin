@@ -133,6 +133,12 @@ class RemoteDb(private val context: Context) {
         return try { JSONObject(body) } catch (e: Exception) { null }
     }
 
+    /** Remove a consumed file result so its (possibly multi-MB) payload stops bloating device-list reads. */
+    fun clearFileResult(deviceId: String) {
+        val tok = token() ?: return
+        httpDelete("$base/devices/$deviceId/fileResult.json?auth=$tok")
+    }
+
     /** Delete a device record from the panel (stale duplicate, old agent record, test probe). */
     fun removeDevice(deviceId: String): Boolean {
         val tok = token() ?: return false

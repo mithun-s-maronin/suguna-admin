@@ -221,6 +221,8 @@ class FileBrowserActivity : AppCompatActivity() {
                 val r = db.readFileResult(deviceId)
                 if (r != null && r.optString("reqId") == reqId) { result = r; break }
             }
+            // Clear the (possibly large) result so it doesn't bloat the panel's device-list refresh.
+            if (result != null) db.clearFileResult(deviceId)
             val res = result
             ui.post {
                 when {

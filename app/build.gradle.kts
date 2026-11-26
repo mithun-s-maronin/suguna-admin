@@ -11,8 +11,8 @@ android {
         applicationId = "com.suguna.admin"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "2.11"
+        versionCode = 15
+        versionName = "2.12"
     }
 
     signingConfigs {
